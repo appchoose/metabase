@@ -1,35 +1,32 @@
 (ns metabase.driver.sql.query-processor
   "The Query Processor is responsible for translating the Metabase Query Language into HoneySQL SQL forms."
-  (:require
-   [clojure.core.match :refer [match]]
-   [clojure.string :as str]
-   [clojure.tools.logging :as log]
-   [honeysql.core :as hsql]
-   [honeysql.format :as hformat]
-   [honeysql.helpers :as h]
-   [metabase.driver :as driver]
-   [metabase.driver.common :as driver.common]
-   [metabase.mbql.schema :as mbql.s]
-   [metabase.mbql.util :as mbql.u]
-   [metabase.models.field :as field :refer [Field]]
-   [metabase.models.table :refer [Table]]
-   [metabase.query-processor.error-type :as qp.error-type]
-   [metabase.query-processor.interface :as i]
-   [metabase.query-processor.middleware.annotate :as annotate]
-   [metabase.query-processor.middleware.wrap-value-literals
-    :as value-literal]
-   [metabase.query-processor.store :as qp.store]
-   [metabase.query-processor.util.add-alias-info :as add]
-   [metabase.query-processor.util.nest-query :as nest-query]
-   [metabase.util :as u]
-   [metabase.util.honeysql-extensions :as hx]
-   [metabase.util.i18n :refer [deferred-tru tru]]
-   [potemkin.types :as p.types]
-   [pretty.core :refer [PrettyPrintable]]
-   [schema.core :as s])
-  (:import
-   (metabase.models.field FieldInstance)
-   (metabase.util.honeysql_extensions Identifier TypedHoneySQLForm)))
+  (:require [clojure.core.match :refer [match]]
+            [clojure.string :as str]
+            [clojure.tools.logging :as log]
+            [honeysql.core :as hsql]
+            [honeysql.format :as hformat]
+            [honeysql.helpers :as h]
+            [metabase.driver :as driver]
+            [metabase.driver.common :as driver.common]
+            [metabase.mbql.schema :as mbql.s]
+            [metabase.mbql.util :as mbql.u]
+            [metabase.models.field :as field :refer [Field]]
+            [metabase.models.table :refer [Table]]
+            [metabase.query-processor.error-type :as qp.error-type]
+            [metabase.query-processor.interface :as i]
+            [metabase.query-processor.middleware.annotate :as annotate]
+            [metabase.query-processor.middleware.wrap-value-literals :as value-literal]
+            [metabase.query-processor.store :as qp.store]
+            [metabase.query-processor.util.add-alias-info :as add]
+            [metabase.query-processor.util.nest-query :as nest-query]
+            [metabase.util :as u]
+            [metabase.util.honeysql-extensions :as hx]
+            [metabase.util.i18n :refer [deferred-tru tru]]
+            [potemkin.types :as p.types]
+            [pretty.core :refer [PrettyPrintable]]
+            [schema.core :as s])
+  (:import metabase.models.field.FieldInstance
+           [metabase.util.honeysql_extensions Identifier TypedHoneySQLForm]))
 
 (def source-query-alias
   "Alias to use for source queries, e.g.:

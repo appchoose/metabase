@@ -1,6 +1,5 @@
 (ns metabase.driver.sql.query-processor-test
-  (:require [clojure.string :as str]
-            [clojure.test :refer :all]
+  (:require [clojure.test :refer :all]
             [honeysql.core :as hsql]
             [metabase.driver :as driver]
             [metabase.driver.sql-jdbc.test-util :as sql-jdbc.tu]
