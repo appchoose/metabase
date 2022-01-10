@@ -508,12 +508,12 @@
                                 $longitude
                                 $price
                                 [:expression "RelativePrice"]]
-                  :expressions {:RelativePrice [:/ $price &CategoriesStats.*AvgPrice/Integer]},
+                  :expressions {:RelativePrice [:/ $price &CategoriesStats.*AvgPrice/Integer]}
                   :joins       [{:condition    [:= $category_id &CategoriesStats.venues.category_id]
                                  :source-query {:source-table $$venues
                                                 :aggregation  [[:aggregation-options [:max $price] {:name "MaxPrice"}]
                                                                [:aggregation-options [:avg $price] {:name "AvgPrice"}]
-                                                               [:aggregation-options [:min $price] {:name "MinPrice"}]],
+                                                               [:aggregation-options [:min $price] {:name "MinPrice"}]]
                                                 :breakout     [$category_id]}
                                  :alias        "CategoriesStats"
                                  :fields       :all}]
@@ -538,7 +538,7 @@
                                         :breakout     [&P1.products.category
                                                        [:field %people.source {:join-alias "People"}]]}
                          :joins        [{:fields       :all
-                                         :condition    [:= $products.category &Q2.products.category]
+                                         :condition    [:= &P1.products.category &Q2.products.category]
                                          :alias        "Q2"
                                          :source-query {:source-table $$reviews
                                                         :joins        [{:fields       :all
@@ -557,7 +557,7 @@
                    (mt/formatted-rows [str str int str int]
                      (qp/process-query query))))))
 
-        (testing "and custom expressions (#13649)"
+        (testing "and custom expressions (#13649) (#18086)"
           (let [query (mt/mbql-query orders
                         {:source-query {:source-table $$orders
                                         :aggregation  [[:count]]
@@ -576,7 +576,6 @@
                                               [:field "count" {:base-type :type/BigInteger, :join-alias "Q2"}]
                                               [:field "count" {:base-type :type/BigInteger}]]}
                          :limit        2})]
-            ;; This result is actually wrong due to metabase#18086, the correct result is [4 89 0.46 41].
-            (is (= [[4 89 0.46 89]]
+            (is (= [[4 89 0.46 41]]
                    (mt/formatted-rows [int int 2.0 int]
                      (qp/process-query query))))))))))
