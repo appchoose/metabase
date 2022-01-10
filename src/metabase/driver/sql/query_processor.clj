@@ -386,38 +386,63 @@
       (hx/* bin-width)
       (hx/+ min-value)))
 
+(defn- field-source-table-aliases
+  "Get sequence of alias that should be used to qualify a `:field` clause when compiling (e.g. left-hand side of an
+  `AS`).
+
+    (field-source-table-aliases [:field 1 nil]) ; -> [\"public\" \"venues\"]"
+  [[_ id-or-name {::add/keys [source-table]}]]
+  (let [source-table (or source-table
+                         (when (integer? id-or-name)
+                           (:table_id (qp.store/field id-or-name))))]
+    (cond
+      (= source-table ::add/source) [source-query-alias]
+      (integer? source-table)       (let [{schema :schema, table-name :name} (qp.store/table source-table)]
+                                      [schema table-name])
+      source-table                  [source-table])))
+
+(defn- field-source-alias
+  "Get alias that should be use to refer to a `:field` clause when compiling (e.g. left-hand side of an `AS`).
+
+    (field-source-alias [:field 1 nil]) ; -> \"price\""
+  [[_ id-or-name {::add/keys [source-alias]}]]
+  (or source-alias
+      (when (string? id-or-name)
+        id-or-name)
+      (when (integer? id-or-name)
+        (:name (qp.store/field id-or-name)))))
+
 (defmethod ->honeysql [:sql :field]
   [driver [_ id-or-name {:keys             [database-type]
-                         ::add/keys        [source-table source-alias]
                          ::nest-query/keys [outer-select]
                          :as               options}
            :as field-clause]]
   (try
-    (let [table-alias (cond
-                        (= source-table ::add/source) [source-query-alias]
-                        (integer? source-table)       (let [{schema :schema, table-name :name} (qp.store/table source-table)]
-                                                        [schema table-name])
-                        source-table                  [source-table])]
+    (let [source-table-aliases (field-source-table-aliases field-clause)
+          source-alias         (field-source-alias field-clause)
+          field                (when (integer? id-or-name)
+                                 (qp.store/field id-or-name))
+          allow-casting?       (and field
+                                    (not outer-select))
+          database-type        (or database-type
+                                   (:database_type field))]
       (binding [*field-options* options
-                *table-alias*   table-alias]
-        (let [field         (when (integer? id-or-name)
-                              (qp.store/field id-or-name))
-              source-alias  (or source-alias
-                                (when (string? id-or-name)
-                                  id-or-name))
-              database-type (or database-type
-                                (:database_type field))
-              honeysql-form (cond-> (->honeysql driver (apply hx/identifier :field (concat table-alias [source-alias])))
-                              (and field
-                                   (not outer-select)) ((partial cast-field-if-needed driver field))
-                              database-type            (hx/with-database-type-info database-type))]
-          (cond->> honeysql-form
+                #_*table-alias* #_table-alias]
+        (let [identifier (apply hx/identifier :field (concat source-table-aliases [source-alias]))]
+          (cond->> (->honeysql driver identifier)
+            allow-casting?           (cast-field-if-needed driver field)
+            database-type            (#(hx/with-database-type-info % database-type))
             (:temporal-unit options) (apply-temporal-bucketing driver options)
             (:binning options)       (apply-binning options)))))
     (catch Throwable e
       (throw (ex-info (tru "Error compiling :field clause: {0}" (ex-message e))
                       {:clause field-clause}
                       e)))))
+
+;; deprecated, but we'll keep it here for now for backwards compatibility
+(defmethod ->honeysql [:sql (type Field)]
+  [driver field]
+  (->honeysql driver [:field (:id field) nil]))
 
 (defmethod ->honeysql [:sql :count]
   [driver [_ field]]
@@ -600,12 +625,22 @@
 ;;; |                                            Field Aliases (AS Forms)                                            |
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-(defn field-clause->alias
-  "DEPRECATED IN 0.42.0: You do not need to use this function directly. You can use
-  `::metabase.query-processor.util.add-alias-info/desired-alias` in the clause options instead."
-  {:deprecated "0.42.0"}
-  [_driver [_ _ {::add/keys [desired-alias]} :as clause] & _]
-  desired-alias)
+;; TODO -- this name is a bit of a misnomer since it also handles `:aggregation` and `:expression` clauses.
+(s/defn field-clause->alias :- (s/pred some? "non-nil")
+  "Generate HoneySQL for an approriate alias (e.g., for use with SQL `AS`) for a `:field`, `:expression`, or
+  `:aggregation` clause of any type, or `nil` if the Field should not be aliased. By default uses the
+  `::add/desired-alias` key in the clause options.
+
+  Optional third parameter `unique-name-fn` is no longer used as of 0.42.0."
+  [_driver [clause-type id-or-name {::add/keys [desired-alias]}] & _unique-name-fn]
+  (or desired-alias
+      ;; fallback behavior for anyone using SQL QP functions directly without including the stuff from
+      ;; [[metabase.query-processor.util.add-alias-info]]
+      (when (string? id-or-name)
+        id-or-name)
+      (when (and (= clause-type :field)
+                 (integer? id-or-name))
+        (:name (qp.store/field id-or-name)))))
 
 (defn as
   "Generate HoneySQL for an `AS` form (e.g. `<form> AS <field>`) using the name information of a `clause`. The
@@ -620,10 +655,11 @@
     (as [:field \"x\" {:base-type :type/Text, :temporal-unit :month}])
     ;; -> [<compiled-form> :x]
     ;; -> SELECT date_extract(\"x\", 'month') AS \"x\""
-  [driver [_ _ {::add/keys [desired-alias]} :as clause] & _unique-name-fn]
-  (let [honeysql-form (->honeysql driver clause)]
-    (if desired-alias
-      [honeysql-form desired-alias]
+  [driver clause & _unique-name-fn]
+  (let [honeysql-form (->honeysql driver clause)
+        field-alias   (field-clause->alias driver clause)]
+    (if field->alias
+      [honeysql-form field-alias]
       honeysql-form)))
 
 
@@ -714,6 +750,7 @@
 
 (defmethod ->honeysql [:sql :=]
   [driver [_ field value]]
+  (assert field)
   [:= (->honeysql driver field) (->honeysql driver value)])
 
 (defn- correct-null-behaviour

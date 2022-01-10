@@ -33,6 +33,17 @@
           :query
           sql.qp-test-util/pretty-sql))))
 
+(deftest compile-FieldInstance-test
+  (testing "For legacy compatibility, we should still be able to compile Field instances (for now)"
+    (driver/with-driver :h2
+      (mt/with-everything-store
+        (is (= "SELECT VENUES.PRICE AS PRICE WHERE VENUES.PRICE = 4"
+               (->> {:query {:fields [[:field (mt/id :venues :price)]]
+                             :filter [:= (Field (mt/id :venues :price)) [:value 4 {:base-type :type/Integer}]]}}
+                    (sql.qp/mbql->native :h2)
+                    :query
+                    sql.qp-test-util/pretty-sql)))))))
+
 (deftest not-null-test
   (is (= '{:select [count (*) AS count]
            :from   [CHECKINS]
