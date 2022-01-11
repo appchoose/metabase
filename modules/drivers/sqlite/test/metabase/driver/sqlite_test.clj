@@ -3,6 +3,7 @@
             [clojure.test :refer :all]
             [metabase.driver :as driver]
             [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
+            [metabase.driver.sql.query-processor-test-util :as sql.qp-test-util]
             [metabase.models.database :refer [Database]]
             [metabase.models.table :refer [Table]]
             [metabase.query-processor-test :as qp.test]
@@ -11,8 +12,7 @@
             [metabase.test.data :as data]
             [metabase.test.util :as tu]
             [toucan.db :as db]
-            [toucan.hydrate :refer [hydrate]]
-            [metabase.driver.sql.query-processor-test-util :as sql.qp-test-util]))
+            [toucan.hydrate :refer [hydrate]]))
 
 (deftest timezone-id-test
   (mt/test-driver :sqlite

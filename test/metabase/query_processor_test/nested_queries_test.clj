@@ -108,7 +108,7 @@
                      [2 33.8894 8]
                      [2 33.9997 7]
                      [3 10.0646 2]
-                     [4 33.983 2]],
+                     [4 33.983 2]]
               :cols [(qp.test/breakout-col (qp.test/fk-col :checkins :venue_id :venues :price))
                      (qp.test/breakout-col (qp.test/fk-col :checkins :venue_id :venues :latitude))
                      (qp.test/aggregate-col :count)]}
@@ -1233,4 +1233,34 @@
             (is (= [["2016-04-01T00:00:00Z" 1]
                     ["2016-05-01T00:00:00Z" 5]]
                    (mt/formatted-rows [str int]
+                     (qp/process-query query))))))))))
+
+(deftest join-against-query-with-implicit-joins-test
+  (testing "Should be able to do subsequent joins against a query with implicit joins (#17767)"
+    (mt/test-drivers (mt/normal-drivers-with-feature
+                      :nested-queries
+                      :basic-aggregations
+                      :foreign-keys)
+      (mt/dataset sample-dataset
+        (let [query (mt/mbql-query orders
+                      {:source-query {:source-table $$orders
+                                      :aggregation  [[:count]]
+                                      :breakout     [$product_id->products.id]}
+                       :joins        [{:fields       :all
+                                       :source-table $$reviews
+                                       ;; It's wack that the FE is using a FIELD LITERAL here but it should still work
+                                       ;; anyway.
+                                       :condition    [:= *products.id &Reviews.reviews.product_id]
+                                       :alias        "Reviews"}]
+                       :limit        1})]
+          (testing "results"
+            (is (= [[1
+                     93
+                     1
+                     1
+                     "christ"
+                     5
+                     "Ad perspiciatis quis et consectetur. Laboriosam fuga voluptas ut et modi ipsum. Odio et eum numquam eos nisi. Assumenda aut magnam libero maiores nobis vel beatae officia."
+                     "2018-05-15T20:25:48.517Z"]]
+                   (mt/formatted-rows [int int int int str int str str]
                      (qp/process-query query))))))))))

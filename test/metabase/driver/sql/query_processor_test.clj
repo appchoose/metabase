@@ -2,7 +2,6 @@
   (:require [clojure.test :refer :all]
             [honeysql.core :as hsql]
             [metabase.driver :as driver]
-            [metabase.driver.sql-jdbc.test-util :as sql-jdbc.tu]
             [metabase.driver.sql.query-processor :as sql.qp]
             [metabase.driver.sql.query-processor-test-util :as sql.qp-test-util]
             [metabase.models.field :refer [Field]]
@@ -145,15 +144,16 @@
                sql.qp-test-util/sql->sql-map)))))
 
 (deftest handle-source-query-params-test
-  (testing "params from source queries should get passed in to the top-level. Semicolons should be removed"
-    (is (= {:query  "SELECT \"source\".* FROM (SELECT * FROM some_table WHERE name = ?) \"source\" WHERE (\"source\".\"name\" <> ? OR \"source\".\"name\" IS NULL)"
-            :params ["Cam" "Lucky Pigeon"]}
-           (sql.qp/mbql->native
-            :h2
-            (mt/mbql-query venues
-              {:source-query {:native "SELECT * FROM some_table WHERE name = ?;", :params ["Cam"]}
-               :source-metadata [{:name "name", :base_type :type/Integer}]
-               :filter       [:!= *name/Integer "Lucky Pigeon"]}))))))
+  (driver/with-driver :h2
+    (testing "params from source queries should get passed in to the top-level. Semicolons should be removed"
+      (is (= {:query  "SELECT \"source\".* FROM (SELECT * FROM some_table WHERE name = ?) \"source\" WHERE (\"source\".\"name\" <> ? OR \"source\".\"name\" IS NULL)"
+              :params ["Cam" "Lucky Pigeon"]}
+             (sql.qp/mbql->native
+              :h2
+              (mt/mbql-query venues
+                {:source-query    {:native "SELECT * FROM some_table WHERE name = ?;", :params ["Cam"]}
+                 :source-metadata [{:name "name", :base_type :type/Integer}]
+                 :filter          [:!= *name/Integer "Lucky Pigeon"]})))))))
 
 (deftest joins-against-native-queries-test
   (testing "Joins against native SQL queries should get converted appropriately! make sure correct HoneySQL is generated"
@@ -792,12 +792,44 @@
                       sum (VENUES.PRICE) AS sum_2]
              :from   [VENUES]
              :limit  [1]}
-           (-> (mt/mbql-query venues
-                 {:aggregation [[:sum $id]
-                                [:sum $price]]
-                  :limit       1})
-               mbql->native
-               sql.qp-test-util/sql->sql-map)))))
+           (sql.qp-test-util/query->sql-map
+            (mt/mbql-query venues
+              {:aggregation [[:sum $id]
+                             [:sum $price]]
+               :limit       1}))))))
+
+(deftest join-against-query-with-implicit-joins-test
+  (testing "Should be able to do subsequent joins against a query with implicit joins (#17767)"
+    (mt/dataset sample-dataset
+     (is (= '{:select    [source.PRODUCTS__via__PRODUCT_ID__ID AS PRODUCTS__via__PRODUCT_ID__ID
+                          source.count                         AS count
+                          Reviews.ID                           AS Reviews__ID
+                          Reviews.PRODUCT_ID                   AS Reviews__PRODUCT_ID
+                          Reviews.REVIEWER                     AS Reviews__REVIEWER
+                          Reviews.RATING                       AS Reviews__RATING
+                          Reviews.BODY                         AS Reviews__BODY
+                          Reviews.CREATED_AT                   AS Reviews__CREATED_AT]
+              :from      [{:select    [PRODUCTS__via__PRODUCT_ID.ID AS PRODUCTS__via__PRODUCT_ID__ID
+                                       count (*)                    AS count]
+                           :from      [ORDERS]
+                           :left-join [PRODUCTS PRODUCTS__via__PRODUCT_ID
+                                       ON ORDERS.PRODUCT_ID = PRODUCTS__via__PRODUCT_ID.ID]
+                           :group-by  [PRODUCTS__via__PRODUCT_ID.ID]
+                           :order-by  [PRODUCTS__via__PRODUCT_ID.ID ASC]}
+                          source]
+              :left-join [REVIEWS Reviews
+                          ON source.PRODUCTS__via__PRODUCT_ID__ID = Reviews.PRODUCT_ID]
+              :limit     [1]}
+            (sql.qp-test-util/query->sql-map
+             (mt/mbql-query orders
+               {:source-query {:source-table $$orders
+                               :aggregation  [[:count]]
+                               :breakout     [$product_id->products.id]}
+                :joins        [{:fields       :all
+                                :source-table $$reviews
+                                :condition    [:= *ID/BigInteger &Reviews.reviews.product_id]
+                                :alias        "Reviews"}]
+                :limit        1})))))))
 
 (deftest mega-query-test
   (testing "Should generate correct SQL for joins against source queries that contain joins (#12928)"
