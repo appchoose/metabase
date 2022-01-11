@@ -1,5 +1,6 @@
 (ns metabase.query-processor.util.add-alias-info
   (:require [clojure.walk :as walk]
+            [metabase.driver :as driver]
             [metabase.mbql.schema :as mbql.s]
             [metabase.mbql.util :as mbql.u]
             [metabase.query-processor.error-type :as qp.error-type]
@@ -7,6 +8,33 @@
             [metabase.util.i18n :refer [tru]]
             [metabase.util.schema :as su]
             [schema.core :as s]))
+
+;; these methods were moved from [[metabase.driver.sql.query-processor]] in 0.42.0
+
+(defmulti prefix-field-alias
+  "Create a Field alias by combining a `prefix` string with `field-alias` string. The default implementation just joins
+  the two strings with `__` -- override this if you need to do something different."
+  {:arglists '([driver prefix field-alias]), :added "0.38.1"}
+  driver/dispatch-on-initialized-driver
+  :hierarchy #'driver/hierarchy)
+
+(defmethod prefix-field-alias :default
+  [_driver prefix field-alias]
+  (str prefix "__" field-alias))
+
+(defmulti ^String escape-alias
+  "Return the String that should be emitted in the query for the given `alias-name`, which will follow the equivalent of
+  a SQL `AS` clause. This is to allow for escaping names that particular databases may not allow as aliases for custom
+  expressions or fields (even when quoted).
+
+  Defaults to identity (i.e. returns `alias-name` unchanged)."
+  {:added "0.41.0" :arglists '([driver alias-name])}
+  driver/dispatch-on-initialized-driver
+  :hierarchy #'driver/hierarchy)
+
+(defmethod escape-alias :default
+  [_driver alias-name]
+  alias-name)
 
 (defn- remove-namespaced-options [options]
   (not-empty (into {}
@@ -123,12 +151,13 @@
                                           (and table-id (= table-id source-table)) table-id
                                           :else                                    ::source)
             source-alias                (cond
-                                          (and join-alias (not join-is-this-level?))   (format "%s__%s" join-alias field-name)
+                                          (and join-alias (not join-is-this-level?))   (prefix-field-alias driver/*driver* join-alias field-name)
                                           (and join-is-this-level? join-desired-alias) join-desired-alias
                                           :else                                        field-name)
-            desired-alias               (if join-alias
-                                          (format "%s__%s" join-alias (or join-desired-alias field-name))
-                                          field-name)]
+            desired-alias               (->> (if join-alias
+                                               (prefix-field-alias driver/*driver* join-alias (or join-desired-alias field-name))
+                                               field-name)
+                                             (escape-alias driver/*driver*))]
         [:field id-or-name (merge opts
                                   {::source-table table
                                    ::source-alias source-alias}
@@ -145,18 +174,20 @@
                            :clause &match
                            :path   &parents
                            :query  inner-query})))
-        (let [[_ ag-name _] (nth aggregations index)]
+        (let [[_ ag-name _] (nth aggregations index)
+              ag-name       (escape-alias driver/*driver* ag-name)]
           [:aggregation index (merge opts
                                      {::desired-alias (position->alias position ag-name)
                                       ::position      position})]))
 
       [:expression expression-name & more]
-      (let [position (clause->position &match)
-            [opts]   more]
+      (let [position      (clause->position &match)
+            [opts]        more
+            desired-alias (escape-alias driver/*driver* expression-name)]
         [:expression expression-name (merge opts
-                                            {::desired-alias expression-name}
+                                            {::desired-alias desired-alias}
                                             (when position
-                                              {::desired-alias (position->alias position expression-name)
+                                              {::desired-alias (position->alias position desired-alias)
                                                ::position      position}))]))))
 
 (defn add-alias-info

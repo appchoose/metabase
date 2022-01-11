@@ -22,7 +22,7 @@
             [metabase.util :as u]
             [metabase.util.honeysql-extensions :as hx]
             [metabase.util.i18n :refer [deferred-tru tru]]
-            [potemkin.types :as p.types]
+            [potemkin :as p]
             [pretty.core :refer [PrettyPrintable]]
             [schema.core :as s])
   (:import metabase.models.field.FieldInstance
@@ -48,13 +48,16 @@
   Each nested query increments this counter by 1."
   0)
 
-;; This is mainly for use by other drivers -- AFAIK only [[metabase.driver.sqlserver]] actually uses it
-(def ^:dynamic ^{:deprecated "0.42.0"} *field-options*
-  "Bound to the `options` part of a `:field` clause when that clause is being compiled to HoneySQL. Useful if you store
-  additional keys there and need to access them."
+;; This is mainly for use by other drivers -- AFAIK only [[metabase.driver.sqlserver]] actually uses it. Consider seeing
+;; if we can deprecate it.
+(def ^:dynamic *field-options*
+  "This is automatically bound to the `options` part of a `:field` clause when that clause is being compiled to
+  HoneySQL. Useful if you store additional keys there and need to access them.
+
+  This value is not used by the SQL QP code itself, and overriding it will have no effect."
   nil)
 
-(p.types/deftype+ SQLSourceQuery [sql params]
+(p/deftype+ SQLSourceQuery [sql params]
   hformat/ToSql
   (to-sql [_]
     (dorun (map hformat/add-anon-param params))
@@ -167,37 +170,20 @@
   [_ field]
   (apply hsql/qualify (field/qualified-name-components field)))
 
-;; TODO -- we need to wire this back up with the new things we're doing
-(defmulti ^String escape-alias
-  "Return the String that should be emitted in the query for the given `alias-name`, which will follow the `AS` clause.
-  This is to allow for escaping names that particular databases may not allow as aliases for custom expressions
-  or fields (even when quoted).
-
-  Defaults to identity (i.e. returns `alias-name` unchanged)."
-  {:added "0.41.0" :arglists '([driver alias-name])}
-  driver/dispatch-on-initialized-driver
-  :hierarchy #'driver/hierarchy)
-
-(defmethod escape-alias :sql
-  [_ alias-name]
-  alias-name)
-
 (defmulti ^String field->alias
-  "Return the string alias that should be used to for `field`, an instance of the Field model, i.e. in an `AS` clause.
-  The default implementation calls `escape-alias` on the field `:name`, which returns the *unqualified* name of the
-  Field.
+  "Returns an escaped alias for a Field instance `field`.
 
-  Return `nil` to prevent `field` from being aliased.
-
-  DEPRECATED as of x.42.  This multimethod will be removed in a future release.  Instead, drivers will simply
-  override the `escape-alias` multimethod if they want to influence the alias to be used for a given field name."
-  {:arglists '([driver field]), :deprecated "0.42.0"}
+  DEPRECATED as of x.41. This method is no longer used by the SQL QP itself, but is still available for existing code
+  already using it. This multimethod will be removed in a future release. Instead, drivers will simply override
+  the [[metabase.query-processor.util.add-alias-info/escape-alias]] multimethod if they want to influence the alias to
+  be used for a given field name."
+  {:arglists '([driver field]), :deprecated "0.41.0"}
   driver/dispatch-on-initialized-driver
   :hierarchy #'driver/hierarchy)
 
 (defmethod field->alias :sql
   [driver field]
-  (escape-alias driver (:name field)))
+  (add/escape-alias driver (:name field)))
 
 (defmulti quote-style
   "Return the quoting style that should be used by [HoneySQL](https://github.com/jkk/honeysql) when building a SQL
@@ -230,7 +216,8 @@
 (defmethod cast-temporal-string :default
   [driver coercion-strategy _expr]
   (throw (ex-info (tru "Driver {0} does not support {1}" driver coercion-strategy)
-                     {:type qp.error-type/unsupported-feature})))
+                  {:type qp.error-type/unsupported-feature
+                   :coercion-strategy coercion-strategy})))
 
 (defmethod unix-timestamp->honeysql [:sql :milliseconds]
   [driver _ expr]
@@ -271,13 +258,12 @@
 ;;; |                                           Low-Level ->honeysql impls                                           |
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-;; TODO -- not 100% sure this should actually be deprecated
 (def ^:dynamic ^{:deprecated "0.42.0"} *table-alias*
   "The alias, if any, that should be used to qualify Fields when building the HoneySQL form, instead of defaulting to
   schema + Table name. Used to implement things like joined `:field`s.
 
-  DEPRECATED -- use the value of the `:metabase.sql.query-processor/table-alias` added to the Field
-  options and to the [[metabase.models.field]] instance to get this information."
+  Deprecated (unused) in 0.42.0+. Instead of using this, use or override `::add/source-table` in the
+  `:field`/`:expression`/`:aggregation` options."
   nil)
 
 (def ^:dynamic ^{:deprecated "0.42.0"} *source-query*
@@ -345,21 +331,6 @@
 (defmethod ->honeysql [:sql Identifier]
   [_ identifier]
   identifier)
-
-(defmulti prefix-field-alias
-  "Create a Field alias by combining a `prefix` string with `field-alias` string (itself is the result of the
-  [[field->alias]] method). The default implementation just joins the two strings with `__` -- override this if you need
-  to do something different.
-
-  DEPRECATED -- since [[field->alias]] is no longer used, this method is no longer needed. Implement [[escape-alias]]
-  instead if needed."
-  {:arglists '([driver prefix field]), :added "0.38.1", :deprecated "0.42.0"}
-  driver/dispatch-on-initialized-driver
-  :hierarchy #'driver/hierarchy)
-
-(defmethod prefix-field-alias :sql
-  [_ prefix field-alias]
-  (str prefix "__" field-alias))
 
 (defn apply-temporal-bucketing
   "Apply temporal bucketing for the `:temporal-unit` in the options of a `:field` clause; return a new HoneySQL form that
@@ -436,7 +407,7 @@
                       {:clause field-clause}
                       e)))))
 
-;; deprecated, but we'll keep it here for now for backwards compatibility
+;; deprecated, but we'll keep it here for now for backwards compatibility. TODO -- should we log a warning about this?
 (defmethod ->honeysql [:sql (type Field)]
   [driver field]
   (->honeysql driver [:field (:id field) nil]))
@@ -1007,9 +978,7 @@
       (when-not i/*disable-qp-logging*
         (log/tracef "\nHoneySQL Form: %s\n%s" (u/emoji "🍯") (u/pprint-to-str 'cyan <>))))))
 
-;;; +----------------------------------------------------------------------------------------------------------------+
-;;; |                                                 MBQL -> Native                                                 |
-;;; +----------------------------------------------------------------------------------------------------------------+
+;;;; MBQL -> Native
 
 (defn mbql->native
   "Transpile MBQL query into a native SQL statement."
@@ -1017,3 +986,12 @@
   (let [honeysql-form (mbql->honeysql driver outer-query)
         [sql & args]  (format-honeysql driver honeysql-form)]
     {:query sql, :params args}))
+
+
+;;;; Potemkin Exports for Covenience/Backwards Compatibility
+
+(p/import-vars
+ ;; These multimethods were moved to [[metabase.query-processor.util.add-alias-info]] in 0.42.0
+ [add
+  escape-alias
+  prefix-field-alias])

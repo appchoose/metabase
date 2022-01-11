@@ -1,10 +1,14 @@
 (ns metabase.query-processor.util.add-alias-info-test
   (:require [clojure.test :refer :all]
             [clojure.walk :as walk]
+            [metabase.driver :as driver]
+            [metabase.driver.h2 :as h2]
             [metabase.query-processor :as qp]
             [metabase.query-processor.middleware.fix-bad-references :as fix-bad-refs]
             [metabase.query-processor.util.add-alias-info :as add]
             [metabase.test :as mt]))
+
+(comment h2/keep-me)
 
 (deftest normalize-clause-test
   (is (= [:expression "wow"]
@@ -27,7 +31,8 @@
 
 (defn- add-alias-info [query]
   (mt/with-everything-store
-    (-> query qp/query->preprocessed add/add-alias-info remove-source-metadata (dissoc :middleware))))
+    (driver/with-driver (or driver/*driver* :h2)
+      (-> query qp/query->preprocessed add/add-alias-info remove-source-metadata (dissoc :middleware)))))
 
 (deftest join-in-source-query-test
   (is (query= (mt/mbql-query venues
@@ -307,3 +312,96 @@
                                                                :condition    [:= $reviews.product_id &P2.products.id]
                                                                :alias        "P2"}]}}]
                       :limit  2})))))))
+
+(driver/register! ::custom-prefix-style :parent :h2)
+
+(defmethod add/prefix-field-alias ::custom-prefix-style
+  [_driver prefix field-alias]
+  (format "%s~~%s" prefix field-alias))
+
+(deftest custom-prefix-style-test
+  (let [db (mt/db)]
+    (driver/with-driver ::custom-prefix-style
+      (mt/with-db db
+        (is (query= (mt/$ids venues
+                      {:source-table $$venues
+                       :fields       [[:field %price {::add/source-table  $$venues
+                                                      ::add/source-alias  "PRICE"
+                                                      ::add/desired-alias "PRICE"
+                                                      ::add/position      0}]
+                                      [:field %categories.name {:join-alias         "Cat"
+                                                                ::add/source-table  "Cat"
+                                                                ::add/source-alias  "NAME"
+                                                                ::add/desired-alias "Cat~~NAME"
+                                                                ::add/position      1}]]
+                       :joins        [{:source-table $$categories
+                                       :fields       [[:field %categories.name {:join-alias         "Cat"
+                                                                                ::add/source-table  "Cat"
+                                                                                ::add/source-alias  "NAME"
+                                                                                ::add/desired-alias "Cat~~NAME"
+                                                                                ::add/position      1}]]
+                                       :alias        "Cat"
+                                       :condition    [:=
+                                                      [:field %category_id {::add/source-table  $$venues
+                                                                            ::add/source-alias  "CATEGORY_ID"}]
+                                                      [:field %categories.id {:join-alias         "Cat"
+                                                                              ::add/source-table  "Cat"
+                                                                              ::add/source-alias  "ID"}]]
+                                       :strategy     :left-join}]
+                       :limit        1})
+                    (-> (mt/mbql-query venues
+                          {:fields [$price]
+                           :joins  [{:source-table $$categories
+                                     :fields       [&Cat.categories.name]
+                                     :alias        "Cat"
+                                     :condition    [:= $category_id &Cat.categories.id]}]
+                           :limit  1})
+                        add-alias-info
+                        :query)))))))
+
+(driver/register! ::custom-escape :parent :h2)
+
+(defmethod add/escape-alias ::custom-escape
+  [_driver field-alias]
+  (str "COOL." field-alias))
+
+(deftest custom-escape-alias-test
+  (let [db (mt/db)]
+    (driver/with-driver ::custom-escape
+      (mt/with-db db
+        (is (query= (mt/$ids venues
+                      (merge
+                          {:source-query (let [price [:field %price {::add/source-table  $$venues
+                                                                     ::add/source-alias  "PRICE"
+                                                                     ::add/desired-alias "COOL.PRICE"
+                                                                     ::add/position      0}]]
+                                           {:source-table $$venues
+                                            :expressions  {:double_price [:* price 2]}
+                                            :fields       [price
+                                                           [:expression "double_price" {::add/desired-alias "COOL.double_price"
+                                                                                        ::add/position      1}]]
+                                            :limit        1})}
+                          (let [double-price [:field
+                                              "double_price"
+                                              {:base-type          :type/Integer
+                                               ::add/source-table  ::add/source
+                                               ;; TODO -- these don't agree with the source query (maybe they should
+                                               ;; both be prefixed by another `COOL.` I think) although I'm not sure it
+                                               ;; makes sense to try to assume this stuff either. Arguably the field
+                                               ;; clause should be `[:field "COOL.double_price" ...]` or something
+                                               ::add/source-alias  "double_price"
+                                               ::add/desired-alias "COOL.double_price"
+                                               ::add/position      0}]]
+                            {:aggregation [[:aggregation-options [:count] {:name "count"}]]
+                             :breakout    [double-price]
+                             :order-by    [[:asc double-price]]})))
+                    (-> (mt/mbql-query venues
+                          {:source-query {:source-table $$venues
+                                          :expressions  {:double_price [:* $price 2]}
+                                          :fields       [$price
+                                                         [:expression "double_price"]]
+                                          :limit        1}
+                           :aggregation  [[:count]]
+                           :breakout     [[:field "double_price" {:base-type :type/Integer}]]})
+                        add-alias-info
+                        :query)))))))
