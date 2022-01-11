@@ -591,20 +591,22 @@
     :else
     x))
 
-(s/defn update-field-options :- mbql.s/field
-  "Like `clojure.core/update`, but for the options in a `:field` clause."
-  [[_ id-or-name opts] :- mbql.s/field f & args]
-  [:field id-or-name (remove-empty (apply f opts args))])
+(s/defn update-field-options :- mbql.s/FieldOrAggregationReference
+  "Like [[clojure.core/update]], but for the options in a `:field`, `:expression`, or `:aggregation` clause."
+  [[clause-type id-or-name opts] :- mbql.s/FieldOrAggregationReference f & args]
+  [clause-type id-or-name (remove-empty (apply f opts args))])
 
 (defn assoc-field-options
-  "Like `clojure.core/assoc`, but for the options in a `:field` clause."
-  [field-clause & kvs]
-  (apply update-field-options field-clause assoc kvs))
+  "Like [[clojure.core/assoc]], but for the options in a `:field`, `:expression`, or `:aggregation` clause."
+  [clause & kvs]
+  (apply update-field-options clause assoc kvs))
 
 (defn with-temporal-unit
   "Set the `:temporal-unit` of a `:field` clause to `unit`."
-  [field-clause unit]
-  (assoc-field-options field-clause :temporal-unit unit))
+  [clause unit]
+  ;; it doesn't make sense to call this on an `:expression` or `:aggregation`.
+  (assert (is-clause? :field "clause"))
+  (assoc-field-options clause :temporal-unit unit))
 
 #?(:clj
    (p/import-vars

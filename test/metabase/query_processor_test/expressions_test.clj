@@ -433,3 +433,26 @@
                  {:expressions {(keyword "Refund Amount (?)") [:* $price -1]}
                   :limit       1
                   :order-by    [[:asc $id]]})))))))
+
+(deftest join-table-on-itself-with-custom-column-test
+  (testing "Should be able to join a source query against itself using an expression (#17770)"
+    (mt/test-drivers (mt/normal-drivers-with-feature :nested-queries :expressions)
+      (mt/dataset sample-dataset
+        (let [query (mt/mbql-query nil
+                      {:source-query {:source-query {:source-table $$products
+                                                     :aggregation  [[:count]]
+                                                     :breakout     [$products.category]}
+                                      :expressions  {:CC [:+ 1 1]}}
+                       :joins        [{:source-query {:source-query {:source-table $$products
+                                                                     :aggregation  [[:count]]
+                                                                     :breakout     [$products.category]}
+                                                      :expressions  {:CC [:+ 1 1]}}
+                                       :alias        "Q1"
+                                       :condition    [:=
+                                                      [:field "CC" {:base-type :type/Integer}]
+                                                      [:field "CC" {:base-type :type/Integer, :join-alias "Q1"}]]
+                                       :fields       :all}]
+                       :limit        1})]
+          (is (= [["Doohickey" 42 2 42 2]]
+                 (mt/formatted-rows [str int int int int]
+                   (qp/process-query query)))))))))

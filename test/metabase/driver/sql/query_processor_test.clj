@@ -831,6 +831,55 @@
                                 :alias        "Reviews"}]
                 :limit        1})))))))
 
+(deftest join-table-on-itself-with-custom-column-test
+  (testing "Should be able to join a source query against itself using an expression (#17770)"
+    (mt/dataset sample-dataset
+      (is (= '{:select    [Q1.CATEGORY  AS Q1__CATEGORY
+                           source.count AS count
+                           source.CC    AS CC
+                           Q1.count     AS Q1__count
+                           Q1.CC        AS Q1__CC]
+               :from      [{:select [source.CATEGORY AS CATEGORY
+                                     source.count    AS count
+                                     (1 + 1)         AS CC]
+                            :from   [{:select   [PRODUCTS.CATEGORY AS CATEGORY
+                                                 count (*)         AS count]
+                                      :from     [PRODUCTS]
+                                      :group-by [PRODUCTS.CATEGORY]
+                                      :order-by [PRODUCTS.CATEGORY ASC]}
+                                     source]} source]
+               :left-join [{:select [source.CATEGORY AS CATEGORY
+                                     source.count AS count
+                                     source.CC AS CC]
+                            :from   [{:select [source.CATEGORY AS CATEGORY
+                                               source.count AS count
+                                               (1 + 1) AS CC]
+                                      :from   [{:select   [PRODUCTS.CATEGORY AS CATEGORY
+                                                           count (*)         AS count]
+                                                :from     [PRODUCTS]
+                                                :group-by [PRODUCTS.CATEGORY]
+                                                :order-by [PRODUCTS.CATEGORY ASC]}
+                                               source]}
+                                     source]}
+                           Q1 ON source.CC = Q1.CC]
+               :limit     [1]}
+             (sql.qp-test-util/query->sql-map
+              (mt/mbql-query nil
+                {:source-query {:source-query {:source-table $$products
+                                               :aggregation  [[:count]]
+                                               :breakout     [$products.category]}
+                                :expressions  {:CC [:+ 1 1]}}
+                 :joins        [{:source-query {:source-query {:source-table $$products
+                                                               :aggregation  [[:count]]
+                                                               :breakout     [$products.category]}
+                                                :expressions  {:CC [:+ 1 1]}}
+                                 :alias        "Q1"
+                                 :condition    [:=
+                                                [:field "CC" {:base-type :type/Integer}]
+                                                [:field "CC" {:base-type :type/Integer, :join-alias "Q1"}]]
+                                 :fields       :all}]
+                 :limit        1})))))))
+
 (deftest mega-query-test
   (testing "Should generate correct SQL for joins against source queries that contain joins (#12928)"
     (mt/dataset sample-dataset
