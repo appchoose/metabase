@@ -605,7 +605,7 @@
   "Set the `:temporal-unit` of a `:field` clause to `unit`."
   [clause unit]
   ;; it doesn't make sense to call this on an `:expression` or `:aggregation`.
-  (assert (is-clause? :field "clause"))
+  (assert (is-clause? :field clause))
   (assoc-field-options clause :temporal-unit unit))
 
 #?(:clj
