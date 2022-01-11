@@ -371,6 +371,9 @@
                                                [:field "max" {:base-type :type/Number}]
                                                [:field "min" {:base-type :type/Number}]]}})))))))
 
+;; if this test is failing it probably means that the driver treats identifiers as case-insensitive. You can implement
+;; [[metabase.query-processor.util.add-alias-info/escape-alias]] if this is the case -- see [[metabase.driver.sqlite]]
+;; for an example.
 (deftest expression-with-duplicate-column-name
   (mt/test-drivers (mt/normal-drivers-with-feature :expressions)
     (testing "Can we use expression with same column name as table (#14267)"

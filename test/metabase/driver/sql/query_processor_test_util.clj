@@ -1,12 +1,18 @@
 (ns metabase.driver.sql.query-processor-test-util
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [metabase.driver :as driver]
+            [metabase.driver.sql.query-processor :as sql.qp]
+            [metabase.driver.util :as driver.u]
+            [metabase.query-processor :as qp]
+            [metabase.test :as mt]))
 
 (defn pretty-sql [s]
   (if-not (string? s)
     s
     (-> s
         (str/replace #"\"([\w\d_-]+)\"" "$1")
-        (str/replace #"PUBLIC\." ""))))
+        (str/replace #"PUBLIC\." "")
+        (str/replace #"public\." ""))))
 
 (defn even-prettier-sql [s]
   (-> s
@@ -14,7 +20,6 @@
       (str/replace #"\s+" " ")
       (str/replace #"\(\s*" "(")
       (str/replace #"\s*\)" ")")
-      (str/replace #"PUBLIC\." "")
       (str/replace #"'" "\"")
       str/trim))
 
@@ -65,3 +70,21 @@
 
 (defn sql->sql-map [sql]
   (-> sql even-prettier-sql symbols sql-map))
+
+(defn query->raw-sql
+  ([{database-id :database, :as query}]
+   (query->raw-sql (or driver/*driver*
+                       (driver.u/database->driver database-id))
+                   query))
+
+  ([driver query]
+   (mt/with-everything-store
+     (driver/with-driver driver
+       (-> (sql.qp/mbql->native driver (qp/query->preprocessed query))
+           :query)))))
+
+(def ^{:arglists '([query] [driver query])} query->sql
+  (comp pretty-sql query->raw-sql))
+
+(def ^{:arglists '([query] [driver query])} query->sql-map
+  (comp sql->sql-map query->sql))

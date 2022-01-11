@@ -514,34 +514,33 @@
                sql.qp-test-util/sql->sql-map)))))
 
 (deftest expressions-and-coercions-test
-  (mt/test-drivers (conj (sql-jdbc.tu/sql-jdbc-drivers) :bigquery)
-    (testing "Don't cast in both inner select and outer select when expression (#12430)"
-      (mt/with-temp-vals-in-db Field (mt/id :venues :price) {:coercion_strategy :Coercion/UNIXSeconds->DateTime
-                                                             :effective_type    :type/DateTime}
-        (let [query (mt/mbql-query venues
-                      {:expressions {:test ["*" 1 1]}
-                       :fields      [$price
-                                     [:expression "test"]]
-                       :limit       1})]
-          (testing "Generated SQL"
-            (is (= '{:select [source.PRICE AS PRICE
-                              source.test  AS test]
-                     :from   [{:select [VENUES.ID                                                             AS ID
-                                        VENUES.NAME                                                           AS NAME
-                                        VENUES.CATEGORY_ID                                                    AS CATEGORY_ID
-                                        VENUES.LATITUDE                                                       AS LATITUDE
-                                        VENUES.LONGITUDE                                                      AS LONGITUDE
-                                        timestampadd ("second" VENUES.PRICE timestamp "1970-01-01T00:00:00Z") AS PRICE
-                                        (1 * 1) AS test]
-                               :from   [VENUES]}
-                              source]
-                     :limit  [1]}
-                   (-> query mbql->native sql.qp-test-util/sql->sql-map)))
-            (testing "Results"
-              (let [results (qp/process-query query)]
-                (is (schema= [(s/one s/Str "date")
-                              (s/one s/Num "expression")]
-                             (-> results mt/rows first)))))))))))
+  (testing "Don't cast in both inner select and outer select when expression (#12430)"
+    (mt/with-temp-vals-in-db Field (mt/id :venues :price) {:coercion_strategy :Coercion/UNIXSeconds->DateTime
+                                                           :effective_type    :type/DateTime}
+      (let [query (mt/mbql-query venues
+                    {:expressions {:test ["*" 1 1]}
+                     :fields      [$price
+                                   [:expression "test"]]
+                     :limit       1})]
+        (testing "Generated SQL"
+          (is (= '{:select [source.PRICE AS PRICE
+                            source.test  AS test]
+                   :from   [{:select [VENUES.ID                                                             AS ID
+                                      VENUES.NAME                                                           AS NAME
+                                      VENUES.CATEGORY_ID                                                    AS CATEGORY_ID
+                                      VENUES.LATITUDE                                                       AS LATITUDE
+                                      VENUES.LONGITUDE                                                      AS LONGITUDE
+                                      timestampadd ("second" VENUES.PRICE timestamp "1970-01-01T00:00:00Z") AS PRICE
+                                      (1 * 1) AS test]
+                             :from   [VENUES]}
+                            source]
+                   :limit  [1]}
+                 (-> query mbql->native sql.qp-test-util/sql->sql-map)))
+          (testing "Results"
+            (let [results (qp/process-query query)]
+              (is (schema= [(s/one s/Str "date")
+                            (s/one s/Num "expression")]
+                           (-> results mt/rows first))))))))))
 
 (deftest nested-mbql-source-query-test
   (is (= '{:select    [VENUES.ID          AS ID
@@ -669,33 +668,32 @@
              sql.qp-test-util/sql->sql-map))))
 
 (deftest expression-with-duplicate-column-name-test
-  (mt/test-drivers (mt/normal-drivers-with-feature :expressions)
-    (testing "Can we use expression with same column name as table (#14267)"
-      (mt/dataset sample-dataset
-        (is (= '{:select   [source.CATEGORY_2 AS CATEGORY_2
-                            count (*)         AS count]
-                 :from     [{:select [PRODUCTS.ID                  AS ID
-                                      PRODUCTS.EAN                 AS EAN
-                                      PRODUCTS.TITLE               AS TITLE
-                                      PRODUCTS.CATEGORY            AS CATEGORY
-                                      PRODUCTS.VENDOR              AS VENDOR
-                                      PRODUCTS.PRICE               AS PRICE
-                                      PRODUCTS.RATING              AS RATING
-                                      PRODUCTS.CREATED_AT          AS CREATED_AT
-                                      concat (PRODUCTS.CATEGORY ?) AS CATEGORY_2]
-                             :from   [PRODUCTS]}
-                            source]
-                 :group-by [source.CATEGORY_2]
-                 :order-by [source.CATEGORY_2 ASC]
-                 :limit    [1]}
-               (-> (mt/mbql-query products
-                     {:expressions {:CATEGORY [:concat $category "2"]}
-                      :breakout    [[:expression :CATEGORY]]
-                      :aggregation [[:count]]
-                      :order-by    [[:asc [:expression :CATEGORY]]]
-                      :limit       1})
-                   mbql->native
-                   sql.qp-test-util/sql->sql-map)))))))
+  (testing "Can we use expression with same column name as table (#14267)"
+    (mt/dataset sample-dataset
+      (is (= '{:select   [source.CATEGORY_2 AS CATEGORY_2
+                          count (*)         AS count]
+               :from     [{:select [PRODUCTS.ID                  AS ID
+                                    PRODUCTS.EAN                 AS EAN
+                                    PRODUCTS.TITLE               AS TITLE
+                                    PRODUCTS.CATEGORY            AS CATEGORY
+                                    PRODUCTS.VENDOR              AS VENDOR
+                                    PRODUCTS.PRICE               AS PRICE
+                                    PRODUCTS.RATING              AS RATING
+                                    PRODUCTS.CREATED_AT          AS CREATED_AT
+                                    concat (PRODUCTS.CATEGORY ?) AS CATEGORY_2]
+                           :from   [PRODUCTS]}
+                          source]
+               :group-by [source.CATEGORY_2]
+               :order-by [source.CATEGORY_2 ASC]
+               :limit    [1]}
+             (-> (mt/mbql-query products
+                   {:expressions {:CATEGORY [:concat $category "2"]}
+                    :breakout    [[:expression :CATEGORY]]
+                    :aggregation [[:count]]
+                    :order-by    [[:asc [:expression :CATEGORY]]]
+                    :limit       1})
+                 mbql->native
+                 sql.qp-test-util/sql->sql-map))))))
 
 (deftest join-source-queries-with-joins-test
   (testing "Should be able to join against source queries that themselves contain joins (#12928)"
