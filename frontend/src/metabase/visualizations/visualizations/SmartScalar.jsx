@@ -13,7 +13,7 @@ import Icon from "metabase/components/Icon";
 import { formatBucketing } from "metabase/lib/query_time";
 
 import { columnSettings } from "metabase/visualizations/lib/settings/column";
-import { NoBreakoutError } from "metabase/visualizations/lib/errors";
+// import { NoBreakoutError } from "metabase/visualizations/lib/errors";
 
 import ScalarValue, {
   ScalarWrapper,
@@ -57,7 +57,7 @@ export default class Smart extends React.Component {
   };
 
   static isSensible({ insights }) {
-    return insights && insights.length > 0;
+    return true
   }
 
   // Smart scalars need to have a breakout
@@ -70,9 +70,9 @@ export default class Smart extends React.Component {
     settings,
   ) {
     if (!insights || insights.length === 0) {
-      throw new NoBreakoutError(
-        t`Group by a time field to see how this has changed over time`,
-      );
+      // use Choose custom view
+      console.log("Switching to Choose custom view")
+      return true
     }
   }
 
@@ -103,28 +103,56 @@ export default class Smart extends React.Component {
     const insights =
       rawSeries && rawSeries[0].data && rawSeries[0].data.insights;
     const insight = _.findWhere(insights, { col: column.name });
-    if (!insight) {
-      return null;
-    }
 
-    const granularity = formatBucketing(insight["unit"]).toLowerCase();
-
-    const lastChange = insight["last-change"];
-    const previousValue = insight["previous-value"];
-
-    const isNegative = lastChange < 0;
     const isSwapped = settings["scalar.switch_positive_negative"];
 
-    // if the number is negative but thats been identified as a good thing (e.g. decreased latency somehow?)
-    const changeColor = (isSwapped
-    ? !isNegative
-    : isNegative)
-      ? color("error")
-      : color("success");
+    let lastValue
+    const trends = []
+    if (!insight) {
+      // Choose custom smartScalar
+      const cols = rawSeries[0].data.cols;
+      const bucketIdx = _.findIndex(cols, (col) => col.base_type === 'type/Text');
+      if (bucketIdx > -1) {
+        const valueIdx = _.findIndex(cols, (val) => val.display_name === column.name);
+        lastValue = rawSeries[0].data.rows[0][valueIdx];
+        rawSeries[0].data.rows.forEach((row, idx) => {
+          if (!idx) { return }
+          const trend = {
+            granularity: formatBucketing(row[bucketIdx]).toLowerCase(),
+            previousValue: row[valueIdx],
+            lastChange: (lastValue - row[valueIdx])/row[valueIdx],
+          }
+          trend.isNegative = trend.lastChange < 0;
+          trend.changeColor = (isSwapped ? !trend.isNegative: trend.isNegative)
+              ? color("error")
+              : color("success");
+          trends.push(trend)
+        })
+      } else {
+        return null;
+      }
+    } else {
+      const granularity = formatBucketing(insight["unit"]).toLowerCase();
 
-    const changeDisplay = (
+      const lastChange = insight["last-change"];
+      const previousValue = insight["previous-value"];
+
+      const isNegative = lastChange < 0;
+
+      // if the number is negative but thats been identified as a good thing (e.g. decreased latency somehow?)
+      const changeColor = (isSwapped
+      ? !isNegative
+      : isNegative)
+        ? color("error")
+        : color("success");
+      trends.push({granularity, lastChange, previousValue, isNegative, changeColor})
+
+      lastValue = insight["last-value"]
+    }
+
+    const changeDisplay = (value) => (
       <span style={{ fontWeight: 900 }}>
-        {formatNumber(Math.abs(lastChange), { number_style: "percent" })}
+        {formatNumber(Math.abs(value), { number_style: "percent" })}
       </span>
     );
     const separator = (
@@ -139,8 +167,8 @@ export default class Smart extends React.Component {
         •
       </span>
     );
-    const granularityDisplay = (
-      <span style={{ marginLeft: 5 }}>{jt`last ${granularity}`}</span>
+    const granularityDisplay = (value) => (
+      <span style={{ marginLeft: 5 }}>{jt`last ${value}`}</span>
     );
 
     const clicked = {
@@ -176,7 +204,7 @@ export default class Smart extends React.Component {
           ref={scalar => (this._scalar = scalar)}
         >
           <ScalarValue
-            value={formatValue(insight["last-value"], settings.column(column))}
+            value={formatValue(lastValue, settings.column(column))}
           />
         </span>
         {isDashboard && (
@@ -190,36 +218,40 @@ export default class Smart extends React.Component {
           />
         )}
         <Box className="SmartWrapper">
-          {lastChange == null || previousValue == null ? (
+          {!trends.length ? (
             <Box
               className="text-centered text-bold mt1"
               color={color("text-medium")}
-            >{jt`Nothing to compare for the previous ${granularity}.`}</Box>
-          ) : lastChange === 0 ? (
-            t`No change from last ${granularity}`
+            >{jt`Nothing to compare for the previous .`}</Box>
           ) : (
-            <Flex align="center" mt={1} flexWrap="wrap">
-              <Flex align="center" color={changeColor}>
-                <Icon
-                  size={13}
-                  pr={1}
-                  name={isNegative ? "arrow_down" : "arrow_up"}
-                />
-                {changeDisplay}
-              </Flex>
-              <h4
-                id="SmartScalar-PreviousValue"
-                className="flex align-center hide lg-show"
-                style={{
-                  color: color("text-medium"),
-                }}
-              >
-                {jt`${separator} was ${formatValue(
-                  previousValue,
-                  settings.column(column),
-                )} ${granularityDisplay}`}
-              </h4>
-            </Flex>
+            <div>
+            {trends.map((trend, idx) => {
+              return (
+                <Flex key={idx} align="center" mt={1} flexWrap="wrap">
+                  <Flex align="center" color={trend.changeColor}>
+                    <Icon
+                      size={13}
+                      pr={1}
+                      name={trend.isNegative ? "arrow_down" : "arrow_up"}
+                    />
+                    {changeDisplay(trend.lastChange)}
+                  </Flex>
+                  <h4
+                    id="SmartScalar-PreviousValue"
+                    className="flex align-center hide lg-show"
+                    style={{
+                      color: color("text-medium"),
+                    }}
+                  >
+                    {!isFullscreen &&
+                      jt`${separator} was ${formatValue(
+                        trend.previousValue,
+                        settings.column(column),
+                      )} ${granularityDisplay(trend.granularity)}`}
+                  </h4>
+                </Flex>
+              )})}
+              </div>
           )}
         </Box>
       </ScalarWrapper>
