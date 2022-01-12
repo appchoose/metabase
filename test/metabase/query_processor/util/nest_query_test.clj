@@ -8,6 +8,7 @@
             [metabase.query-processor.util.nest-query :as nest-query]
             [metabase.test :as mt]))
 
+;; TODO -- this is duplicated with [[metabase.query-processor.util.add-alias-info-test/remove-source-metadata]]
 (defn- remove-source-metadata [x]
   (walk/postwalk
    (fn [x]

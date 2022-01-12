@@ -6,6 +6,7 @@
             [java-time :as t]
             [metabase.config :as config]
             [metabase.driver :as driver]
+            [metabase.driver.case-insensitive-identifiers :as case-insensitive-identifiers]
             [metabase.driver.common :as driver.common]
             [metabase.driver.sql :as sql]
             [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
@@ -22,7 +23,8 @@
            [java.time LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime]
            java.util.Date))
 
-(driver/register! :sqlserver, :parent :sql-jdbc)
+(driver/register! :sqlserver, :parent #{:sql-jdbc
+                                        ::case-insensitive-identifiers/case-insensitive-identifiers})
 
 (defmethod driver/supports? [:sqlserver :regex] [_ _] false)
 (defmethod driver/supports? [:sqlserver :percentile-aggregations] [_ _] false)
@@ -395,30 +397,36 @@
 ;;
 ;; - Add a max-results `:limit` to source queries if there's not already one
 
+(defn- in-source-query? [path]
+  (= (last path) :source-query))
+
+(defn- in-join-source-query? [path]
+  (and (in-source-query? path)
+       (= (last (butlast path)) :joins)))
+
+(defn- has-order-by-without-limit? [m]
+  (and (map? m)
+       (:order-by m)
+       (not (:limit m))))
+
+(defn- remove-order-by? [path m]
+  (and (has-order-by-without-limit? m)
+       (in-join-source-query? path)))
+
+(defn- add-limit? [path m]
+  (and (has-order-by-without-limit? m)
+       (not (in-join-source-query? path))
+       (in-source-query? path)))
+
 (defn- fix-order-bys [inner-query]
-  (letfn [(in-source-query? [parents]
-            (= (last parents) :source-query))
-          (llast [coll]
-            (last (butlast coll)))
-          (in-join-source-query? [parents]
-            (and (in-source-query? parents)
-                 (= (llast parents) :joins)))
-          (order-by-without-limit? [m]
-            (and (map? m)
-                 (:order-by m)
-                 (not (:limit m))))
-          (remove-order-by? [parents m]
-            (and (order-by-without-limit? m)
-                 (in-join-source-query? parents)))
-          (add-limit? [parents m]
-            (and (order-by-without-limit? m)
-                 (in-source-query? parents)))]
+  (letfn []
     (mbql.u/replace inner-query
+      ;; remove order by and then recurse in case we need to do more tranformations at another level
       (m :guard (partial remove-order-by? &parents))
-      (dissoc m :order-by)
+      (fix-order-bys (dissoc m :order-by))
 
       (m :guard (partial add-limit? &parents))
-      (assoc m :limit qp.i/absolute-max-results))))
+      (fix-order-bys (assoc m :limit qp.i/absolute-max-results)))))
 
 (defmethod driver/mbql->native :sqlserver
   [driver query]

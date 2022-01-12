@@ -1142,23 +1142,25 @@
   (mt/test-drivers (mt/normal-drivers-with-feature :foreign-keys :nested-queries)
     (testing "Multi-level aggregations with filter is the last section (#14872)"
       (mt/dataset sample-dataset
-        (is (= [["Awesome Bronze Plate" 115.23]
-                ["Mediocre Rubber Shoes" 101.04]
-                ["Mediocre Wooden Bench" 117.03]
-                ["Sleek Steel Table" 134.91]
-                ["Small Marble Hat" 102.8]]
-               (mt/formatted-rows [str 2.0]
-                 (mt/run-mbql-query orders
-                   {:source-query {:source-query {:source-table $$orders
-                                                  :filter       [:= $user_id 1]
-                                                  :aggregation  [[:sum $total]]
-                                                  :breakout     [!day.created_at
-                                                                 $product_id->products.title
-                                                                 $product_id->products.category]}
-                                   :filter       [:> *sum/Float 100]
-                                   :aggregation  [[:sum *sum/Float]]
-                                   :breakout     [*products.title]}
-                    :filter       [:> *sum/Float 100]}))))))))
+        (let [query (mt/mbql-query orders
+                      {:source-query {:source-query {:source-table $$orders
+                                                     :filter       [:= $user_id 1]
+                                                     :aggregation  [[:sum $total]]
+                                                     :breakout     [!day.created_at
+                                                                    $product_id->products.title
+                                                                    $product_id->products.category]}
+                                      :filter       [:> *sum/Float 100]
+                                      :aggregation  [[:sum *sum/Float]]
+                                      :breakout     [*products.title]}
+                       :filter       [:> *sum/Float 100]})]
+          (mt/with-native-query-testing-context query
+            (is (= [["Awesome Bronze Plate" 115.23]
+                    ["Mediocre Rubber Shoes" 101.04]
+                    ["Mediocre Wooden Bench" 117.03]
+                    ["Sleek Steel Table" 134.91]
+                    ["Small Marble Hat" 102.8]]
+                   (mt/formatted-rows [str 2.0]
+                     (qp/process-query query))))))))))
 
 (deftest date-range-test
   (mt/test-drivers (mt/normal-drivers-with-feature :foreign-keys :nested-queries)
@@ -1241,7 +1243,8 @@
     (mt/test-drivers (mt/normal-drivers-with-feature
                       :nested-queries
                       :basic-aggregations
-                      :foreign-keys)
+                      :foreign-keys
+                      :left-join)
       (mt/dataset sample-dataset
         (let [query (mt/mbql-query orders
                       {:source-query {:source-table $$orders
@@ -1253,7 +1256,7 @@
                                        ;; anyway.
                                        :condition    [:= *products.id &Reviews.reviews.product_id]
                                        :alias        "Reviews"}]
-                       :order-by     [[:asc &Reviews.reviews.id]]
+                       :order-by     [[:asc $product_id->products.id]]
                        :limit        1})]
           (sql.qp-test-util/with-native-query-testing-context query
             (testing "results"

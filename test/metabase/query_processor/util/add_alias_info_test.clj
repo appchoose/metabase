@@ -21,6 +21,7 @@
          (#'add/normalize-clause [:field 1 {}])
          (#'add/normalize-clause [:field 1 {::amazing true}]))))
 
+;; TODO -- this is duplicated with [[metabase.query-processor.util.nest-query-test/remove-source-metadata]]
 (defn- remove-source-metadata [x]
   (walk/postwalk
    (fn [x]

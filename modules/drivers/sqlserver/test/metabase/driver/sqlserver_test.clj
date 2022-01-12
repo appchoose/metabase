@@ -49,6 +49,12 @@
           (testing "In source query -- add `:limit`"
             (is (query= {:source-query (assoc original :limit qp.i/absolute-max-results)}
                         (#'sqlserver/fix-order-bys {:source-query original}))))
+          (testing "In source query in source query-- add `:limit` at both levels"
+            (is (query= {:source-query {:source-query (assoc original :limit qp.i/absolute-max-results)
+                                        :order-by     [[:asc [:field 1]]]
+                                        :limit        qp.i/absolute-max-results}}
+                        (#'sqlserver/fix-order-bys {:source-query {:source-query original
+                                                                   :order-by     [[:asc [:field 1]]]}}))))
           (testing "In source query inside source query for join -- add `:limit`"
             (is (query= {:joins [{:source-query {:source-query (assoc original :limit qp.i/absolute-max-results)}}]}
                         (#'sqlserver/fix-order-bys
