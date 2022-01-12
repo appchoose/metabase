@@ -227,7 +227,7 @@
 
   If this clause is 'selected', this is the position the clause will appear in the results (i.e. the corresponding
   column index)."
-  [query]
+  [query-or-inner-query]
   (walk/postwalk
    (fn [form]
      (if (and (map? form)
@@ -235,4 +235,4 @@
               (not (:strategy form)))
        (add-alias-info* form)
        form))
-   query))
+   query-or-inner-query))

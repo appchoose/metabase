@@ -13,7 +13,6 @@
             [metabase.models.field :as field :refer [Field]]
             [metabase.models.table :refer [Table]]
             [metabase.query-processor.error-type :as qp.error-type]
-            [metabase.query-processor.interface :as i]
             [metabase.query-processor.middleware.annotate :as annotate]
             [metabase.query-processor.middleware.wrap-value-literals :as value-literal]
             [metabase.query-processor.store :as qp.store]
@@ -39,14 +38,6 @@
 (def ^:dynamic *query*
   "The INNER query currently being processed, for situations where we need to refer back to it."
   nil)
-
- ;; TODO -- can we deprecate this? It's only used by [[metabase.driver.sqlserver]], and only to determine whether or not
- ;; we need to add a limit or not.
-(def ^:dynamic *nested-query-level*
-  "How many levels deep are we into nested queries? (0 = top level.) We keep track of this so we know what level to
-  find referenced aggregations (otherwise something like [:aggregation 0] could be ambiguous in a nested query).
-  Each nested query increments this counter by 1."
-  0)
 
 ;; This is mainly for use by other drivers -- AFAIK only [[metabase.driver.sqlserver]] actually uses it. Consider seeing
 ;; if we can deprecate it.
@@ -937,8 +928,7 @@
   (assoc honeysql-form
          :from [[(if native
                    (SQLSourceQuery. native params)
-                   (binding [*nested-query-level* (inc *nested-query-level*)]
-                     (apply-clauses driver {} source-query)))
+                   (apply-clauses driver {} source-query))
                  (->honeysql driver (hx/identifier :table-alias source-query-alias))]]))
 
 (defn- apply-clauses-with-aliased-source-query-table
@@ -964,24 +954,25 @@
        inner-query)
       (apply-top-level-clauses driver honeysql-form inner-query))))
 
-(defn- preprocess-query
-  [driver {:keys [expressions] :as query}]
-  (cond-> query
-    expressions nest-query/nest-expressions))
+(defn preprocess
+  "Do miscellaneous transformations to the MBQL before compiling the query. These changes are idempotent, so it is safe
+  to use this function in your own implementations of [[driver/mbql->native]], if you want to apply changes to the
+  same version of the query that we will ultimately be compiling."
+  [inner-query]
+  (nest-query/nest-expressions (add/add-alias-info inner-query)))
 
 (defn mbql->honeysql
   "Build the HoneySQL form we will compile to SQL and execute."
   [driver {inner-query :query}]
-  (let [query (->> (add/add-alias-info inner-query)
-                   (preprocess-query driver))]
-    (u/prog1 (apply-clauses driver {} query)
-      (when-not i/*disable-qp-logging*
-        (log/tracef "\nHoneySQL Form: %s\n%s" (u/emoji "🍯") (u/pprint-to-str 'cyan <>))))))
+  (let [inner-query (preprocess inner-query)]
+    (u/prog1 (apply-clauses driver {} inner-query)
+      (log/tracef "\nHoneySQL Form: %s\n%s" (u/emoji "🍯") (u/pprint-to-str 'cyan <>)))))
 
 ;;;; MBQL -> Native
 
 (defn mbql->native
-  "Transpile MBQL query into a native SQL statement."
+  "Transpile MBQL query into a native SQL statement. This is the `:sql` driver implementation
+  of [[driver/mbql->native]] (actual multimethod definition is in [[metabase.driver.sql]]."
   [driver {database :database, :as outer-query}]
   (let [honeysql-form (mbql->honeysql driver outer-query)
         [sql & args]  (format-honeysql driver honeysql-form)]

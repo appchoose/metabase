@@ -3,10 +3,8 @@
             [clojure.test :refer :all]
             [honeysql.format :as hformat]
             [metabase.driver :as driver]
-            [metabase.driver.sql.query-processor :as sql.qp]
             [metabase.driver.util :as driver.u]
             [metabase.query-processor :as qp]
-            [metabase.test :as mt]
             [metabase.util :as u]))
 
 ;; [[install-pretty-formatters!]] -- tweaks the actual methods HoneySQL uses to generate SQL strings to add indentation
@@ -57,24 +55,27 @@
 (defn- newline-and-indent []
   (str \newline (indent)))
 
+(def ^:private ^:dynamic *indent-comma-join* true)
+
+(defn- indent-comma-join [strs]
+  (if *indent-comma-join*
+    (str (newline-and-indent)
+         (str/join (str "," (newline-and-indent))
+                   strs))
+    (str/join ", " strs)))
+
 (defmethod pretty-format :default
   [clause sql-map]
   (str
    (newline-and-indent)
-   (binding [*indent* (inc *indent*)]
-     (orig-format-clause clause sql-map))))
-
-(defmethod pretty-format :select
-  [[_ fields] sql-map]
-  (str
-   (newline-and-indent)
-   "SELECT "
-   (when (:modifiers sql-map)
-     (str (hformat/format-modifiers (:modifiers sql-map)) " "))
-   (binding [*indent* (inc *indent*)]
-     (str
-      (newline-and-indent)
-      (str/join (str ","(newline-and-indent)) (map hformat/to-sql fields))))))
+   (binding [*indent*            (inc *indent*)
+             *indent-comma-join* true]
+     (let [to-sql hformat/to-sql]
+       (with-redefs [hformat/comma-join indent-comma-join
+                     hformat/to-sql     (fn [form]
+                                          (binding [*indent-comma-join* false]
+                                            (to-sql form)))]
+         (orig-format-clause clause sql-map))))))
 
 
 ;;;; [[query->sql-map]] and [[sql->sql-map]] -- these parse an actual SQL map into a pseudo-HoneySQL form
@@ -155,14 +156,11 @@
   "Compile an MBQL query to a raw native query (excluding params)."
   ([{database-id :database, :as query}]
    (query->raw-native-query (or driver/*driver*
-                       (driver.u/database->driver database-id))
-                   query))
+                                (driver.u/database->driver database-id))
+                            query))
 
   ([driver query]
-   (mt/with-everything-store
-     (driver/with-driver driver
-       (-> (sql.qp/mbql->native driver (qp/query->preprocessed query))
-           :query)))))
+   (:query (qp/query->native query))))
 
 (def ^{:arglists '([query] [driver query])} query->sql
   "Compile an MBQL query to 'pretty' SQL (i.e., remove quote marks and `public.` qualifiers)."
@@ -184,15 +182,16 @@
         (str "\nNative Query =\n"
              (if (string? native)
                native
-               (u/pprint-to-str native)))))))
+               (u/pprint-to-str native))
+             \newline)))))
+
+(defn do-with-native-query-testing-context
+  [query thunk]
+  (testing (pprint-native-query-with-best-strategy query)
+    (thunk)))
 
 (defmacro with-native-query-testing-context
   "Compile `query` to a native query (and pretty-print it if it is SQL) and add it as [[testing]] context around
   `body`."
   [query & body]
-  `(testing (pprint-native-query-with-best-strategy ~query)
-     (try
-       ~@body
-       (catch Throwable e#
-         (testing (u/colorize 'red "\nUnexpected exception")
-           (is (not e#)))))))
+  `(do-with-native-query-testing-context ~query (fn [] ~@body)))

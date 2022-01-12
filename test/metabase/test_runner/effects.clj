@@ -49,7 +49,7 @@
 ;; basically the same as normal `=` but will add comment forms to MBQL queries for Field clauses and source tables
 ;; telling you the name of the referenced Fields/Tables
 (defmethod t/assert-expr 'query=
-  [message [_ expected actual :as args]]
+  [message [_ expected actual]]
   `(let [expected# ~expected
          actual#   ~actual
          pass?#    (= expected# actual#)
@@ -63,3 +63,27 @@
        :diffs    (when-not pass?#
                    (let [[only-in-actual# only-in-expected#] (data/diff actual# expected#)]
                      [[actual# [only-in-expected# only-in-actual#]]]))})))
+
+(defn sql=-report
+  [message expected query]
+  (let [sql-map ((requiring-resolve 'metabase.driver.sql.query-processor-test-util/query->sql-map)
+                 query)
+        pass?   (= sql-map expected)]
+    {:type     (if pass? :pass :fail)
+     :message  message
+     :expected expected
+     :actual   sql-map
+     :diffs    (when-not pass?
+                 (let [[only-in-actual only-in-expected] (data/diff sql-map expected)]
+                   [[sql-map [only-in-expected only-in-actual]]]))}))
+
+(defmethod t/assert-expr 'sql=
+  [message [_ expected query]]
+  `(let [query# ~query]
+     ;; [[t/testing]] context has to be done around the call to [[t/do-report]]
+     ((requiring-resolve 'metabase.driver.sql.query-processor-test-util/do-with-native-query-testing-context)
+      query#
+      ;; [[t/do-report]] has to be in the expansion, otherwise it picks up the wrong filename and line metadata.
+      (fn []
+        (t/do-report
+         (sql=-report ~message ~expected query#))))))

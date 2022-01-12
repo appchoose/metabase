@@ -6,7 +6,6 @@
             [java-time :as t]
             [medley.core :as m]
             [metabase.driver :as driver]
-            [metabase.driver.sql.query-processor-test-util :as sql.qp-test-util]
             [metabase.query-processor :as qp]
             [metabase.sync :as sync]
             [metabase.test :as mt]
@@ -372,9 +371,8 @@
                                                [:field "max" {:base-type :type/Number}]
                                                [:field "min" {:base-type :type/Number}]]}})))))))
 
-;; if this test is failing it probably means that the driver treats identifiers as case-insensitive. You can implement
-;; [[metabase.query-processor.util.add-alias-info/escape-alias]] if this is the case -- see [[metabase.driver.sqlite]]
-;; for an example.
+;; if this test is failing it probably means that the driver treats identifiers as case-insensitive. Derive your driver
+;; from `:metabase.driver.case-insensitive-identifiers/case-insensitive-identifiers` to fix this.
 (deftest expression-with-duplicate-column-name
   (mt/test-drivers (mt/normal-drivers-with-feature :expressions)
     (testing "Can we use expression with same column name as table (#14267)"
@@ -385,7 +383,7 @@
                        :aggregation [:count]
                        :order-by    [[:asc [:expression :CATEGORY]]]
                        :limit       1})]
-          (sql.qp-test-util/with-native-query-testing-context query
+          (mt/with-native-query-testing-context query
             (is (= [["Doohickey2" 42]]
                    (mt/formatted-rows [str int]
                      (qp/process-query query))))))))))
@@ -458,7 +456,7 @@
                        :order-by     [[:asc $products.category]
                                       [:desc [:field "count" {:base-type :type/Integer}]]]
                        :limit        1})]
-          (sql.qp-test-util/with-native-query-testing-context query
+          (mt/with-native-query-testing-context query
             (is (= [["Doohickey" 54 2 42 2]]
                    (mt/formatted-rows [str int int int int]
                      (qp/process-query query))))))))))
