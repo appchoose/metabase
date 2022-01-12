@@ -1,6 +1,8 @@
 (ns metabase.query-processor.util.add-alias-info
-  (:require [clojure.walk :as walk]
+  (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [metabase.driver :as driver]
+            [metabase.driver.case-insensitive-identifiers :as case-insensitive-identifiers]
             [metabase.mbql.schema :as mbql.s]
             [metabase.mbql.util :as mbql.u]
             [metabase.query-processor.error-type :as qp.error-type]
@@ -23,9 +25,9 @@
   (str prefix "__" field-alias))
 
 (defmulti ^String escape-alias
-  "Return the String that should be emitted in the query for the given `alias-name`, which will follow the equivalent of
-  a SQL `AS` clause. This is to allow for escaping names that particular databases may not allow as aliases for custom
-  expressions or fields (even when quoted).
+  "Return the String that should be emitted in the query for the generated `alias-name`, which will follow the
+  equivalent of a SQL `AS` clause. This is to allow for escaping names that particular databases may not allow as
+  aliases for custom expressions or fields (even when quoted).
 
   Defaults to identity (i.e. returns `alias-name` unchanged)."
   {:added "0.41.0" :arglists '([driver alias-name])}
@@ -35,6 +37,13 @@
 (defmethod escape-alias :default
   [_driver alias-name]
   alias-name)
+
+;; drivers with case-insensitive identifiers can derive from
+;; `:metabase.driver.case-insensitive-identifiers/case-insensitive-identifiers` to get behavior that will work correctly
+;; for them. By lower-casing the identifier name the deduplication logic below make sure identifiers are unique.
+(defmethod escape-alias ::case-insensitive-identifiers/case-insensitive-identifiers
+  [_driver alias-name]
+  (str/lower-case alias-name))
 
 (defn- remove-namespaced-options [options]
   (not-empty (into {}

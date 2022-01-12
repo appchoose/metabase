@@ -6,6 +6,7 @@
             [java-time :as t]
             [metabase.config :as config]
             [metabase.driver :as driver]
+            [metabase.driver.case-insensitive-identifiers :as case-insensitive-identifiers]
             [metabase.driver.common :as driver.common]
             [metabase.driver.sql :as sql]
             [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
@@ -21,7 +22,8 @@
            [java.time LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime]
            java.time.temporal.Temporal))
 
-(driver/register! :sqlite, :parent :sql-jdbc)
+(driver/register! :sqlite, :parent #{:sql-jdbc
+                                     ::case-insensitive-identifiers/case-insensitive-identifiers})
 
 ;; SQLite does not support a lot of features, so do not show the options in the interface
 (doseq [[feature supported?] {:right-join                             false
@@ -102,11 +104,6 @@
   (sql.qp/format-honeysql driver {:select [:*]
                                   :from   [(sql.qp/->honeysql driver (hx/identifier :table schema table))]
                                   :limit  1}))
-
-;; SQL identifiers are case-insensitive so convert them to all-lower-case so we can make sure we get unique stuff
-(defmethod add/escape-alias :sqlite
-  [_driver field-alias]
-  (str/lower-case field-alias))
 
 ;; register the SQLite concatenation operator `||` with HoneySQL as `sqlite-concat`
 ;;

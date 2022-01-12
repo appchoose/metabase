@@ -6,6 +6,7 @@
             [clojure.tools.logging :as log]
             [honeysql.core :as hsql]
             [metabase.driver :as driver]
+            [metabase.driver.case-insensitive-identifiers :as case-insensitive-identifiers]
             [metabase.driver.common :as driver.common]
             [metabase.driver.sql-jdbc.common :as sql-jdbc.common]
             [metabase.driver.sql-jdbc.connection :as sql-jdbc.conn]
@@ -23,7 +24,9 @@
   (:import [java.sql Connection PreparedStatement ResultSet Types]
            java.time.OffsetTime))
 
-(driver/register! :redshift, :parent #{:postgres ::legacy/use-legacy-classes-for-read-and-set})
+(driver/register! :redshift, :parent #{:postgres
+                                       ::legacy/use-legacy-classes-for-read-and-set
+                                       ::case-insensitive-identifiers/case-insensitive-identifiers})
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
 ;;; |                                             metabase.driver impls                                              |
