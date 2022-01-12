@@ -243,8 +243,7 @@ export default class Smart extends React.Component {
                       color: color("text-medium"),
                     }}
                   >
-                    {!isFullscreen &&
-                      jt`${separator} was ${formatValue(
+                    {jt`${separator} was ${formatValue(
                         trend.previousValue,
                         settings.column(column),
                       )} ${granularityDisplay(trend.granularity)}`}
