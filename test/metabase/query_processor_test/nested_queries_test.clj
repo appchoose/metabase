@@ -4,6 +4,7 @@
             [honeysql.core :as hsql]
             [java-time :as t]
             [metabase.driver :as driver]
+            [metabase.driver.sql.query-processor-test-util :as sql.qp-test-util]
             [metabase.mbql.schema :as mbql.s]
             [metabase.models :refer [Dimension Field Metric Segment Table]]
             [metabase.models.card :as card :refer [Card]]
@@ -1252,15 +1253,24 @@
                                        ;; anyway.
                                        :condition    [:= *products.id &Reviews.reviews.product_id]
                                        :alias        "Reviews"}]
+                       :order-by     [[:asc &Reviews.reviews.id]]
                        :limit        1})]
-          (testing "results"
-            (is (= [[1
-                     93
-                     1
-                     1
-                     "christ"
-                     5
-                     "Ad perspiciatis quis et consectetur. Laboriosam fuga voluptas ut et modi ipsum. Odio et eum numquam eos nisi. Assumenda aut magnam libero maiores nobis vel beatae officia."
-                     "2018-05-15T20:25:48.517Z"]]
-                   (mt/formatted-rows [int int int int str int str str]
-                     (qp/process-query query))))))))))
+          (sql.qp-test-util/with-native-query-testing-context query
+            (testing "results"
+              (is (= [[1
+                       93
+                       1
+                       1
+                       "christ"
+                       5
+                       "Ad perspiciatis quis et consectetur. Laboriosam fuga voluptas ut et modi ipsum. Odio et eum numquam eos nisi. Assumenda aut magnam libero maiores nobis vel beatae officia."
+                       "2018-05-15T20:25:48.517Z"]]
+                     (mt/formatted-rows [int int int int str int str str]
+                       (qp/process-query query)))))))))))
+
+(deftest rewrite-field-clauses-test
+  (mt/mbql-query venues
+    {:source-query {:source-query {:source-table $$venues
+                                   :expressions  {:double_price [:* $price 2]}}}
+     :fields       [$price
+                    [:field "double_price" {:base-type :type/Float, ::another-option true}]]}))

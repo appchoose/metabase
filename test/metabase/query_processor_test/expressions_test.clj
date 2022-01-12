@@ -6,6 +6,7 @@
             [java-time :as t]
             [medley.core :as m]
             [metabase.driver :as driver]
+            [metabase.driver.sql.query-processor-test-util :as sql.qp-test-util]
             [metabase.query-processor :as qp]
             [metabase.sync :as sync]
             [metabase.test :as mt]
@@ -378,14 +379,16 @@
   (mt/test-drivers (mt/normal-drivers-with-feature :expressions)
     (testing "Can we use expression with same column name as table (#14267)"
       (mt/dataset sample-dataset
-        (is (= [["Doohickey2" 42]]
-               (mt/formatted-rows [str int]
-                 (mt/run-mbql-query products
-                   {:expressions {:CATEGORY [:concat $category "2"]}
-                    :breakout    [:expression :CATEGORY]
-                    :aggregation [:count]
-                    :order-by    [[:asc [:expression :CATEGORY]]]
-                    :limit       1}))))))))
+        (let [query (mt/mbql-query products
+                      {:expressions {:CATEGORY [:concat $category "2"]}
+                       :breakout    [:expression :CATEGORY]
+                       :aggregation [:count]
+                       :order-by    [[:asc [:expression :CATEGORY]]]
+                       :limit       1})]
+          (sql.qp-test-util/with-native-query-testing-context query
+            (is (= [["Doohickey2" 42]]
+                   (mt/formatted-rows [str int]
+                     (qp/process-query query))))))))))
 
 (deftest fk-field-and-duplicate-names-test
   (mt/test-drivers (mt/normal-drivers-with-feature :expressions :foreign-keys)
@@ -452,7 +455,10 @@
                                                       [:field "CC" {:base-type :type/Integer}]
                                                       [:field "CC" {:base-type :type/Integer, :join-alias "Q1"}]]
                                        :fields       :all}]
+                       :order-by     [[:asc $products.category]
+                                      [:desc [:field "count" {:base-type :type/Integer}]]]
                        :limit        1})]
-          (is (= [["Doohickey" 42 2 42 2]]
-                 (mt/formatted-rows [str int int int int]
-                   (qp/process-query query)))))))))
+          (sql.qp-test-util/with-native-query-testing-context query
+            (is (= [["Doohickey" 54 2 42 2]]
+                   (mt/formatted-rows [str int int int int]
+                     (qp/process-query query))))))))))
