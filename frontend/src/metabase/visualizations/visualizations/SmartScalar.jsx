@@ -115,7 +115,7 @@ export default class Smart extends React.Component {
     const trends = [];
     if (!insight) {
       // Choose custom smartScalar
-      const cols = rawSeries[0].data.cols;
+      const cols = rawSeries[0].data?.cols;
       const bucketIdx = _.findIndex(cols, col => col.base_type === "type/Text");
       if (bucketIdx > -1) {
         const valueIdx = _.findIndex(
