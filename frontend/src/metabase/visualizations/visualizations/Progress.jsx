@@ -151,7 +151,7 @@ export default class Progress extends Component {
     const column = cols[0];
     const goal =
       this.props.series.length > 1
-        ? this.props.series[1].data.rows[0][0]
+        ? this.props.series[1].data.rows[0]?.[0] ?? 0
         : settings["progress.goal"] || 0;
 
     const mainColor = settings["progress.color"];
