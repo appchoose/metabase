@@ -208,7 +208,7 @@ export default class Progress extends Component {
       : -1;
 
     const value = extractProgressValue(rows, columnIndex);
-    const goal = getGoalValue(settings["progress.goal"], cols, rows);
+    const goal = getGoalValue(settings["progress.goal"], cols, rows) ||this.props.series[1]?.data.rows[0]?.[0] || 0;
 
     const metrics = calculateProgressMetrics(value, goal);
     const { hasValidValue, hasValidGoal, barPercent, arrowPercent } = metrics;
