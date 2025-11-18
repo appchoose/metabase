@@ -29,15 +29,15 @@ export function Progress(props: VisualizationProps) {
   const {
     className,
     isMobile,
-    series: [
-      {
-        data: { rows, cols },
-      },
-    ],
+    series,
     settings,
     onVisualizationClick,
     visualizationIsClickable,
   } = props;
+
+  const {
+    data: { rows, cols },
+  } = series[0];
 
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,7 +52,10 @@ export function Progress(props: VisualizationProps) {
     : -1;
 
   const value = extractProgressValue(rows, columnIndex);
-  const goal = getGoalValue(settings["progress.goal"], cols, rows);
+  const goal =
+    getGoalValue(settings["progress.goal"], cols, rows) ||
+    series[1]?.data.rows[0]?.[0] ||
+    0;
 
   const metrics = calculateProgressMetrics(value, goal);
   const { hasValidValue, hasValidGoal, barPercent, arrowPercent } = metrics;
